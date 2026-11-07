@@ -523,9 +523,34 @@ to see the types of all local variables at once. Example:
    # Revealed local types are:
    #     a: builtins.int
    #     b: builtins.str
+
+If an expression has type ``Any`` and you don't know why, use
+``reveal_any_source(expr)``. Mypy shows where the ``Any`` appeared and every
+step it took to reach the expression:
+
+.. code-block:: python
+
+   import json
+
+   def load(path):
+       return open(path).read()
+
+   config = json.loads(load("app.json"))
+   port = config["port"]
+   reveal_any_source(port)
+   # Any comes from explicit 'Any' in return type of "loads" (typeshed/stdlib/json/__init__.pyi:78)
+   #   -> returned by "json.loads(...)" (line 6)
+   #   -> assigned to "config" (line 6)
+   #   -> indexing an Any value ("config[...]") (line 7)
+   #   -> assigned to "port" (line 7)
+
+With :option:`--explain-any <mypy --explain-any>`, mypy prints the same
+explanation under ``reveal_type`` of an ``Any`` value and under the errors
+reported by ``--warn-return-any`` and ``--disallow-any-expr``.
+
 .. note::
 
-    ``reveal_type`` and ``reveal_locals`` are handled specially by mypy during
+    ``reveal_type``, ``reveal_locals`` and ``reveal_any_source`` are handled specially by mypy during
     type checking, and don't have to be defined or imported.
 
     However, if you want to run your code,

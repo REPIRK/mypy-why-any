@@ -484,7 +484,7 @@ class StrConv(NodeVisitor[str]):
         return self.dump([o.expr, o.type], o)
 
     def visit_reveal_expr(self, o: mypy.nodes.RevealExpr) -> str:
-        if o.kind == mypy.nodes.REVEAL_TYPE:
+        if o.kind != mypy.nodes.REVEAL_LOCALS:
             return self.dump([o.expr], o)
         else:
             # REVEAL_LOCALS

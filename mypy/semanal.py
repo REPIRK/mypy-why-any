@@ -57,6 +57,7 @@ from typing import Any, Final, TypeAlias as _TypeAlias, TypeGuard, TypeVar, cast
 from typing_extensions import assert_never
 
 from mypy import errorcodes as codes, message_registry
+from mypy.anytrace import record_origins, record_signature_origins
 from mypy.constant_fold import constant_fold_expr
 from mypy.errorcodes import PROPERTY_DECORATOR, ErrorCode
 from mypy.errors import Errors, report_internal_error
@@ -84,6 +85,7 @@ from mypy.nodes import (
     MDEF,
     NOT_ABSTRACT,
     PARAM_SPEC_KIND,
+    REVEAL_ANY_SOURCE,
     REVEAL_LOCALS,
     REVEAL_TYPE,
     RUNTIME_PROTOCOL_DECOS,
@@ -280,6 +282,7 @@ from mypy.types import (
     TYPE_VAR_LIKE_NAMES,
     TYPED_NAMEDTUPLE_NAMES,
     UNPACK_TYPE_NAMES,
+    AnyStep,
     AnyType,
     CallableType,
     FunctionLike,
@@ -681,6 +684,8 @@ class SemanticAnalyzer(
             # reveal_locals is a mypy-only function that gives an error with the types of
             # locals
             ("reveal_locals", AnyType(TypeOfAny.special_form)),
+            # reveal_any_source explains where the Any type of its argument comes from.
+            ("reveal_any_source", AnyType(TypeOfAny.special_form)),
             ("True", bool_type),
             ("False", bool_type),
             ("__debug__", bool_type),
@@ -1079,6 +1084,8 @@ class SemanticAnalyzer(
                 if isinstance(defn, FuncDef):
                     assert isinstance(defn.type, CallableType)
                     defn.type = set_callable_name(defn.type, defn)
+                if isinstance(defn.type, CallableType):
+                    record_signature_origins(defn.type, defn, self.cur_mod_id)
 
         self.analyze_arg_initializers(defn)
         self.analyze_function_body(defn)
@@ -6095,6 +6102,13 @@ class SemanticAnalyzer(
             expr.analyzed.line = expr.line
             expr.analyzed.column = expr.column
             expr.analyzed.accept(self)
+        elif refers_to_fullname(expr.callee, "builtins.reveal_any_source"):
+            if not self.check_fixed_args(expr, 1, "reveal_any_source"):
+                return
+            expr.analyzed = RevealExpr(kind=REVEAL_ANY_SOURCE, expr=expr.args[0])
+            expr.analyzed.line = expr.line
+            expr.analyzed.column = expr.column
+            expr.analyzed.accept(self)
         elif refers_to_fullname(expr.callee, "builtins.reveal_locals"):
             # Store the local variable names into the RevealExpr for use in the
             # type checking pass
@@ -6455,7 +6469,7 @@ class SemanticAnalyzer(
             expr.type = analyzed
 
     def visit_reveal_expr(self, expr: RevealExpr) -> None:
-        if expr.kind == REVEAL_TYPE:
+        if expr.kind != REVEAL_LOCALS:
             if expr.expr is not None:
                 expr.expr.accept(self)
         else:
@@ -7399,6 +7413,14 @@ class SemanticAnalyzer(
             var._fullname = self.qualified_name(name)
         var.is_ready = True
         any_type = AnyType(TypeOfAny.from_unimported_type, missing_import_name=var._fullname)
+        source = target_name or name
+        any_type.trace = (
+            AnyStep(
+                f'import of "{source}", which mypy could not follow or find',
+                self.cur_mod_id,
+                context.line,
+            ),
+        )
         var.type = any_type
         var.is_suppressed_import = True
         self.add_symbol(
@@ -7993,11 +8015,13 @@ class SemanticAnalyzer(
             analyzing_tvar_def=analyzing_tvar_def,
         )
         tag = self.track_incomplete_refs()
+        line = typ.line
         typ = typ.accept(a)
         if self.found_incomplete_ref(tag):
             # Something could not be bound yet.
             return None
         self.add_type_alias_deps(a.aliases_used)
+        record_origins(typ, self.cur_mod_id, line)
         return typ
 
     def class_type(self, self_type: Type) -> Type:

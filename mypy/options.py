@@ -62,6 +62,7 @@ PER_MODULE_OPTIONS: Final = {
     "strict_optional",
     "warn_no_return",
     "warn_return_any",
+    "explain_any",
     "warn_unreachable",
     "warn_unused_ignores",
 }
@@ -198,6 +199,9 @@ class Options:
         # Warn about returning objects of type Any when the function is
         # declared with a precise type
         self.warn_return_any = False
+
+        # Explain where Any comes from in Any-related errors and in reveal_type()
+        self.explain_any = False
 
         # Report importing or using deprecated features as errors instead of notes.
         self.report_deprecated_as_note = False

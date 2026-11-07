@@ -10,7 +10,7 @@ from typing import cast
 
 from mypy.nodes import (
     GDEF,
-    REVEAL_TYPE,
+    REVEAL_LOCALS,
     Argument,
     AssertStmt,
     AssertTypeExpr,
@@ -551,9 +551,9 @@ class TransformVisitor(NodeVisitor[Node]):
         return AssertTypeExpr(self.expr(node.expr), self.type(node.type))
 
     def visit_reveal_expr(self, node: RevealExpr) -> RevealExpr:
-        if node.kind == REVEAL_TYPE:
+        if node.kind != REVEAL_LOCALS:
             assert node.expr is not None
-            return RevealExpr(kind=REVEAL_TYPE, expr=self.expr(node.expr))
+            return RevealExpr(kind=node.kind, expr=self.expr(node.expr))
         else:
             # Reveal locals expressions don't have any sub expressions
             return node

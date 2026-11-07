@@ -870,6 +870,13 @@ def define_options(
         group=lint_group,
     )
     add_invertible_flag(
+        "--explain-any",
+        default=False,
+        strict_flag=False,
+        help="Explain where Any comes from in errors about Any and in reveal_type()",
+        group=lint_group,
+    )
+    add_invertible_flag(
         "--warn-unreachable",
         default=False,
         strict_flag=False,

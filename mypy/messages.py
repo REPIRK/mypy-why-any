@@ -21,6 +21,7 @@ from typing import Any, Final, cast
 
 import mypy.typeops
 from mypy import errorcodes as codes, message_registry
+from mypy.anytrace import collect_any_types
 from mypy.erasetype import erase_type
 from mypy.errorcodes import ErrorCode
 from mypy.errors import (
@@ -1850,6 +1851,31 @@ class MessageBuilder:
         # Nothing special here; just create the note:
         visitor = TypeStrVisitor(options=self.options)
         self.note(f'Revealed type is "{typ.accept(visitor)}"', context)
+
+    def reveal_any_source(
+        self, typ: Type, context: Context, explain: Callable[[AnyType], list[str]]
+    ) -> None:
+        anys = collect_any_types(typ)
+        p_typ = get_proper_type(typ)
+        if not anys:
+            self.note(f"Type {format_type(typ, self.options)} does not contain Any", context)
+            return
+        if isinstance(p_typ, AnyType):
+            lines = explain(p_typ)
+        else:
+            lines = [f"Type {format_type(typ, self.options)} contains Any"]
+            for any_type in anys[:3]:
+                lines.extend("  " + line for line in explain(any_type))
+        for line in lines:
+            self.note(line, context)
+
+    def explain_any(
+        self, typ: Type, context: Context, explain: Callable[[AnyType], list[str]]
+    ) -> None:
+        """Notes for --explain-any under an error about Any."""
+        for any_type in collect_any_types(typ)[:1]:
+            for line in explain(any_type):
+                self.note(line, context, code=codes.MISC)
 
     def reveal_locals(self, type_map: dict[str, Type | None], context: Context) -> None:
         # To ensure that the output is predictable on Python < 3.6,

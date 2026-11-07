@@ -155,6 +155,7 @@ UNBOUND_IMPORTED: Final = 3
 # RevealExpr node kinds
 REVEAL_TYPE: Final = 0
 REVEAL_LOCALS: Final = 1
+REVEAL_ANY_SOURCE: Final = 2
 
 # Kinds of 'literal' expressions.
 #
@@ -2837,7 +2838,7 @@ class AssertTypeExpr(Expression):
 
 
 class RevealExpr(Expression):
-    """Reveal type expression reveal_type(expr) or reveal_locals() expression."""
+    """reveal_type(expr), reveal_any_source(expr) or reveal_locals() expression."""
 
     __slots__ = ("expr", "kind", "local_nodes", "is_imported")
 

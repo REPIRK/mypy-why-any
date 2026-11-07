@@ -78,6 +78,7 @@ from typing import (
 
 import mypy.checkexpr
 from mypy import errorcodes as codes, join, message_registry, nodes, operators
+from mypy.anytrace import format_trace, short_display_path, short_expr
 from mypy.binder import ConditionalTypeBinder, Frame, get_declaration
 from mypy.checker_shared import CheckerScope, TypeCheckerSharedApi, TypeRange
 from mypy.checker_state import checker_state
@@ -266,6 +267,7 @@ from mypy.types import (
     MYPYC_NATIVE_INT_NAMES,
     NOT_IMPLEMENTED_TYPE_NAMES,
     OVERLOAD_NAMES,
+    AnyStep,
     AnyType,
     BoolTypeQuery,
     CallableType,
@@ -4853,6 +4855,12 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
         refers to the variable (lvalue). If var is None, do nothing.
         """
         if var and not self.current_node_deferred:
+            p_any = get_proper_type(type)
+            if isinstance(p_any, AnyType) and not var.is_argument:
+                target = short_expr(lvalue) if isinstance(lvalue, MemberExpr) else var.name
+                type = p_any.with_step(
+                    AnyStep(f'assigned to "{target}"', self.tree.fullname, lvalue.line)
+                )
             var.type = type
             var.is_inferred = True
             var.is_ready = True
@@ -5426,6 +5434,8 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
                         and not is_lambda
                     ):
                         self.msg.incorrectly_returning_any(return_type, s)
+                        if self.options.explain_any:
+                            self.msg.explain_any(typ, s, self.any_trace_lines)
                     return
 
                 # Disallow return expressions in functions declared to return
@@ -8045,6 +8055,19 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
 
     def store_types(self, d: dict[Expression, Type]) -> None:
         self._type_maps[-1].update(d)
+
+    def any_trace_lines(self, typ: AnyType) -> list[str]:
+        """Explain where an Any type comes from, as lines of notes."""
+        return format_trace(typ, self.module_path, short_display_path(self.path))
+
+    def module_path(self, name: str | None) -> str | None:
+        """Path of the module 'name', which may also be a fullname inside a module."""
+        while name:
+            module = self.modules.get(name)
+            if module is not None:
+                return short_display_path(module.path)
+            name = name.rpartition(".")[0]
+        return None
 
     def in_checked_function(self) -> bool:
         """Should we type-check the current function?

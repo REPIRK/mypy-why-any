@@ -276,6 +276,39 @@ IMPRECISE_ANYS: Final = (
     TypeOfAny.from_omitted_generics,
 )
 
+# Upper bound on the number of steps kept in AnyType.trace. The first step (where the
+# Any was born) is always kept; older propagation steps are dropped first.
+MAX_ANY_TRACE: Final = 25
+
+
+class AnyStep:
+    """One step in the history of an Any type (see reveal_any_source()).
+
+    'module' is a module id, or a fully qualified name that starts with one; it is
+    resolved to a file path only when the trace is displayed.
+    """
+
+    __slots__ = ("message", "module", "line")
+
+    def __init__(self, message: str, module: str | None, line: int) -> None:
+        self.message = message
+        self.module = module
+        self.line = line
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, AnyStep)
+            and self.message == other.message
+            and self.module == other.module
+            and self.line == other.line
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.message, self.module, self.line))
+
+    def __repr__(self) -> str:
+        return f"AnyStep({self.message!r}, {self.module!r}, {self.line})"
+
 
 def deserialize_type(data: JsonDict | str) -> Type:
     if isinstance(data, str):
@@ -1312,7 +1345,7 @@ class UnpackType(ProperType):
 class AnyType(ProperType):
     """The type 'Any'."""
 
-    __slots__ = ("type_of_any", "source_any", "missing_import_name")
+    __slots__ = ("type_of_any", "source_any", "missing_import_name", "trace")
 
     def __init__(
         self,
@@ -1321,9 +1354,16 @@ class AnyType(ProperType):
         missing_import_name: str | None = None,
         line: int = -1,
         column: int = -1,
+        trace: tuple[AnyStep, ...] | None = None,
     ) -> None:
         super().__init__(line, column)
         self.type_of_any = type_of_any
+        # Where this Any was born and how it reached its current place. An Any derived
+        # from another Any continues the trace of the immediate source (source_any below
+        # is collapsed to the root, which would lose the intermediate steps).
+        if trace is None:
+            trace = source_any.trace if source_any is not None else ()
+        self.trace: tuple[AnyStep, ...] = trace
         # If this Any was created as a result of interacting with another 'Any', record the source
         # and use it in reports.
         self.source_any = source_any
@@ -1371,7 +1411,19 @@ class AnyType(ProperType):
             missing_import_name=missing_import_name,
             line=self.line,
             column=self.column,
+            trace=self.trace,
         )
+
+    def with_step(self, step: AnyStep) -> AnyType:
+        """Return a copy of this Any with one more step appended to its trace."""
+        trace = self.trace
+        if trace and trace[-1] == step:
+            return self
+        if len(trace) >= MAX_ANY_TRACE:
+            trace = trace[:1] + trace[len(trace) - MAX_ANY_TRACE + 2 :]
+        result = self.copy_modified()
+        result.trace = trace + (step,)
+        return result
 
     def __hash__(self) -> int:
         return hash(AnyType)
@@ -1385,6 +1437,7 @@ class AnyType(ProperType):
             "type_of_any": self.type_of_any,
             "source_any": self.source_any.serialize() if self.source_any is not None else None,
             "missing_import_name": self.missing_import_name,
+            "trace": [[s.message, s.module, s.line] for s in self.trace],
         }
 
     @classmethod
@@ -1395,6 +1448,7 @@ class AnyType(ProperType):
             data["type_of_any"],
             AnyType.deserialize(source) if source is not None else None,
             data["missing_import_name"],
+            trace=tuple(AnyStep(m, mod, line) for m, mod, line in data.get("trace", ())),
         )
 
     def write(self, data: WriteBuffer) -> None:
@@ -1402,6 +1456,11 @@ class AnyType(ProperType):
         write_type_opt(data, self.source_any)
         write_int(data, self.type_of_any)
         write_str_opt(data, self.missing_import_name)
+        write_int(data, len(self.trace))
+        for step in self.trace:
+            write_str(data, step.message)
+            write_str_opt(data, step.module)
+            write_int(data, step.line)
         write_tag(data, END_TAG)
 
     @classmethod
@@ -1412,7 +1471,13 @@ class AnyType(ProperType):
             source_any = AnyType.read(data)
         else:
             source_any = None
-        ret = AnyType(read_int(data), source_any, read_str_opt(data))
+        type_of_any = read_int(data)
+        missing_import_name = read_str_opt(data)
+        trace = tuple(
+            AnyStep(read_str(data), read_str_opt(data), read_int(data))
+            for _ in range(read_int(data))
+        )
+        ret = AnyType(type_of_any, source_any, missing_import_name, trace=trace)
         assert read_tag(data) == END_TAG
         return ret
 

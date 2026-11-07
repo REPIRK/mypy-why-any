@@ -5,7 +5,7 @@ from __future__ import annotations
 from mypy_extensions import mypyc_attr, trait
 
 from mypy.nodes import (
-    REVEAL_TYPE,
+    REVEAL_LOCALS,
     AssertStmt,
     AssertTypeExpr,
     AssignmentExpr,
@@ -302,7 +302,7 @@ class TraverserVisitor(NodeVisitor[None]):
         o.expr.accept(self)
 
     def visit_reveal_expr(self, o: RevealExpr, /) -> None:
-        if o.kind == REVEAL_TYPE:
+        if o.kind != REVEAL_LOCALS:
             assert o.expr is not None
             o.expr.accept(self)
         else:

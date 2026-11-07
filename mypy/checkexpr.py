@@ -14,6 +14,7 @@ from typing_extensions import assert_never
 import mypy.checker
 import mypy.errorcodes as codes
 from mypy import applytype, erasetype, join, message_registry, nodes, operators, types
+from mypy.anytrace import describe_expression_step
 from mypy.argmap import ArgTypeExpander, map_actuals_to_formals, map_formals_to_actuals
 from mypy.checker_shared import ExpressionCheckerSharedApi
 from mypy.checkmember import analyze_member_access, has_operator
@@ -44,6 +45,7 @@ from mypy.nodes import (
     IMPLICITLY_ABSTRACT,
     LAMBDA_NAME,
     LITERAL_TYPE,
+    REVEAL_ANY_SOURCE,
     REVEAL_LOCALS,
     REVEAL_TYPE,
     UNBOUND_IMPORTED,
@@ -168,6 +170,7 @@ from mypy.typeops import (
 from mypy.types import (
     LITERAL_TYPE_NAMES,
     TUPLE_LIKE_INSTANCE_NAMES,
+    AnyStep,
     AnyType,
     CallableType,
     DeletedType,
@@ -5008,11 +5011,21 @@ class ExpressionChecker(ExpressionVisitor[Type], ExpressionCheckerSharedApi):
             )
             if not self.chk.current_node_deferred:
                 self.msg.reveal_type(revealed_type, expr.expr)
+                if self.chk.options.explain_any:
+                    self.msg.explain_any(revealed_type, expr.expr, self.chk.any_trace_lines)
                 if not self.chk.in_checked_function():
                     self.msg.note(
                         "'reveal_type' always outputs 'Any' in unchecked functions", expr.expr
                     )
                 self.check_reveal_imported(expr)
+            return revealed_type
+        elif expr.kind == REVEAL_ANY_SOURCE:
+            assert expr.expr is not None
+            revealed_type = self.accept(
+                expr.expr, type_context=self.type_context[-1], allow_none_return=True
+            )
+            if not self.chk.current_node_deferred:
+                self.msg.reveal_any_source(revealed_type, expr.expr, self.chk.any_trace_lines)
             return revealed_type
         else:
             # REVEAL_LOCALS
@@ -6385,6 +6398,7 @@ class ExpressionChecker(ExpressionVisitor[Type], ExpressionCheckerSharedApi):
         self.is_callee = old_is_callee
         self.type_context.pop()
         assert typ is not None
+        typ = self.record_any_step(node, typ)
         self.chk.store_type(node, typ)
 
         if (
@@ -6396,6 +6410,8 @@ class ExpressionChecker(ExpressionVisitor[Type], ExpressionCheckerSharedApi):
             and not self.chk.current_node_deferred
         ):
             self.msg.disallowed_any_type(typ, node)
+            if self.chk.options.explain_any:
+                self.msg.explain_any(typ, node, self.chk.any_trace_lines)
 
         if not self.chk.in_checked_function() or self.chk.current_node_deferred:
             result: Type = AnyType(TypeOfAny.unannotated)
@@ -6405,6 +6421,30 @@ class ExpressionChecker(ExpressionVisitor[Type], ExpressionCheckerSharedApi):
             self.per_line_checking_time_ns[node.line] += time.perf_counter_ns() - t0
             self.in_expression = False
         return result
+
+    def record_any_step(self, node: Expression, typ: Type) -> Type:
+        """If an expression evaluates to Any, extend the Any's trace by this expression."""
+        p_typ = get_proper_type(typ)
+        if not isinstance(p_typ, AnyType):
+            return typ
+        if isinstance(node, CallExpr):
+            base: Expression | None = node.callee
+        elif isinstance(node, MemberExpr):
+            base = node.expr
+        elif isinstance(node, IndexExpr):
+            base = node.base
+        elif isinstance(node, (OpExpr, UnaryExpr, ComparisonExpr)):
+            base = None
+        else:
+            return typ
+        base_is_any = False
+        if base is not None:
+            base_type = self.chk.lookup_type_or_none(base)
+            base_is_any = isinstance(get_proper_type(base_type), AnyType)
+        message = describe_expression_step(node, base_is_any)
+        if message is None:
+            return typ
+        return p_typ.with_step(AnyStep(message, self.chk.tree.fullname, node.line))
 
     def accept_maybe_cache(self, node: Expression, type_context: Type | None = None) -> Type:
         binder_version = self.chk.binder.version

@@ -1,0 +1,172 @@
+-- Tests for reveal_any_source() and --explain-any
+
+[case testRevealAnySourceExplicit]
+from typing import Any
+def f() -> Any: ...
+x = f()
+reveal_any_source(x)
+[out]
+main:4: note: Any comes from explicit 'Any' in return type of "f" (line 2)
+main:4: note:   -> returned by "f()" (line 3)
+main:4: note:   -> assigned to "x" (line 3)
+
+[case testRevealAnySourceUnannotatedReturn]
+def load(path):
+    return path
+data = load("x")
+reveal_any_source(data)
+[out]
+main:4: note: Any comes from missing return annotation of "load" (line 1)
+main:4: note:   -> returned by "load(...)" (line 3)
+main:4: note:   -> assigned to "data" (line 3)
+
+[case testRevealAnySourceUnannotatedParameter]
+def f(a, b: int) -> None:
+    reveal_any_source(a)
+    reveal_any_source(b)
+[out]
+main:2: note: Any comes from missing annotation for parameter "a" of "f" (line 1)
+main:3: note: Type "int" does not contain Any
+
+[case testRevealAnySourceAttributeChain]
+from typing import Any
+def f() -> Any: ...
+x = f()
+y = x.a.b
+reveal_any_source(y)
+[out]
+main:5: note: Any comes from explicit 'Any' in return type of "f" (line 2)
+main:5: note:   -> returned by "f()" (line 3)
+main:5: note:   -> assigned to "x" (line 3)
+main:5: note:   -> attribute "a" of an Any value ("x.a") (line 4)
+main:5: note:   -> attribute "b" of an Any value ("x.a.b") (line 4)
+main:5: note:   -> assigned to "y" (line 4)
+
+[case testRevealAnySourceCallOfAny]
+from typing import Any
+def f() -> Any: ...
+z = f()(1)
+reveal_any_source(z)
+[out]
+main:4: note: Any comes from explicit 'Any' in return type of "f" (line 2)
+main:4: note:   -> returned by "f()" (line 3)
+main:4: note:   -> call of an Any value "f()(...)" (line 3)
+main:4: note:   -> assigned to "z" (line 3)
+
+[case testRevealAnySourceIndexOfAny]
+from typing import Any
+def f() -> Any: ...
+x = f()
+reveal_any_source(x[0])
+[out]
+main:4: note: Any comes from explicit 'Any' in return type of "f" (line 2)
+main:4: note:   -> returned by "f()" (line 3)
+main:4: note:   -> assigned to "x" (line 3)
+main:4: note:   -> indexing an Any value ("x[...]") (line 4)
+
+[case testRevealAnySourceExplicitVariable]
+from typing import Any
+x: Any
+reveal_any_source(x)
+[out]
+main:3: note: Any comes from explicit 'Any' (line 2)
+
+[case testRevealAnySourceOmittedGenerics]
+from typing import List
+x: List = []
+reveal_any_source(x)
+[builtins fixtures/list.pyi]
+[out]
+main:3: note: Type "list[Any]" contains Any
+main:3: note:   Any comes from missing type parameters for "list" (line 2)
+
+[case testRevealAnySourceNoAny]
+reveal_any_source(1)
+[out]
+main:1: note: Type "int" does not contain Any
+
+[case testRevealAnySourceUnfollowedImport]
+# flags: --ignore-missing-imports
+import missing_lib
+v = missing_lib.load()
+reveal_any_source(v)
+[out]
+main:4: note: Any comes from import of "missing_lib", which mypy could not follow or find (line 2)
+main:4: note:   -> attribute "load" of an Any value ("missing_lib.load") (line 3)
+main:4: note:   -> call of an Any value "missing_lib.load()" (line 3)
+main:4: note:   -> assigned to "v" (line 3)
+
+[case testRevealAnySourceAcrossModules]
+from util import read
+s = read()
+reveal_any_source(s)
+[file util.py]
+def helper():
+    pass
+def read():
+    return helper()
+[out]
+main:3: note: Any comes from missing return annotation of "read" (tmp/util.py:3)
+main:3: note:   -> returned by "read()" (line 2)
+main:3: note:   -> assigned to "s" (line 2)
+
+[case testRevealAnySourceAcrossModulesIncremental]
+import a
+[file a.py]
+from util import read
+s = read()
+[file a.py.2]
+from util import read
+s = read()
+reveal_any_source(s)
+[file util.py]
+from typing import Any
+def read() -> Any: ...
+[out]
+[out2]
+tmp/a.py:3: note: Any comes from explicit 'Any' in return type of "read" (tmp/util.py:2)
+tmp/a.py:3: note:   -> returned by "read()" (line 2)
+tmp/a.py:3: note:   -> assigned to "s" (line 2)
+
+[case testRevealAnySourceArgCount]
+reveal_any_source()  # E: "reveal_any_source" expects 1 argument
+reveal_any_source(1, 2)  # E: "reveal_any_source" expects 1 argument
+
+[case testExplainAnyWarnReturnAny]
+# flags: --warn-return-any --explain-any
+from typing import Any
+def f() -> Any: ...
+def g() -> int:
+    return f().value
+[out]
+main:5: error: Returning Any from function declared to return "int"
+main:5: note: Any comes from explicit 'Any' in return type of "f" (line 3)
+main:5: note:   -> returned by "f()" (line 5)
+main:5: note:   -> attribute "value" of an Any value ("f().value") (line 5)
+
+[case testExplainAnyDisallowAnyExpr]
+# flags: --disallow-any-expr --explain-any
+from typing import Any
+def f() -> Any: ...
+x = f()  # E: Expression has type "Any" \
+         # N: Any comes from explicit 'Any' in return type of "f" (line 3) \
+         # N:   -> returned by "f()" (line 4)
+
+[case testExplainAnyRevealType]
+# flags: --explain-any
+def f(a):
+    pass
+x = f(1)
+reveal_type(x)
+[out]
+main:5: note: Revealed type is "Any"
+main:5: note: Any comes from missing return annotation of "f" (line 2)
+main:5: note:   -> returned by "f(...)" (line 4)
+main:5: note:   -> assigned to "x" (line 4)
+
+[case testExplainAnyOffByDefault]
+# flags: --warn-return-any
+from typing import Any
+def f() -> Any: ...
+def g() -> int:
+    return f()  # E: Returning Any from function declared to return "int"

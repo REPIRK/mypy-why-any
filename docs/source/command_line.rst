@@ -515,6 +515,16 @@ potentially problematic or redundant in some way.
     This flag causes mypy to generate a warning when returning a value
     with type ``Any`` from a function declared with a non-``Any`` return type.
 
+.. option:: --explain-any
+
+    This flag makes mypy explain where an ``Any`` type comes from: the place
+    where it appeared (an explicit ``Any``, a missing annotation, an unfollowed
+    import, omitted type parameters, ...) and each call, attribute access,
+    index or assignment it went through. The explanation is shown as notes under
+    errors reported by :option:`--warn-return-any` and :option:`--disallow-any-expr`,
+    and under ``reveal_type()`` when the revealed type is ``Any``.
+    ``reveal_any_source(expr)`` shows it regardless of this flag.
+
 .. option:: --warn-unreachable
 
     This flag will make mypy report an error whenever it encounters

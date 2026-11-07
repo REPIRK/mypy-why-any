@@ -1018,7 +1018,7 @@ def callable_type(
     else:
         args = [AnyType(TypeOfAny.unannotated)] * len(fdef.arg_names)
 
-    return CallableType(
+    sig = CallableType(
         args,
         fdef.arg_kinds,
         fdef.arg_names,
@@ -1031,6 +1031,9 @@ def callable_type(
         # We need this for better error messages, like missing `self` note:
         definition=fdef if isinstance(fdef, FuncDef) else None,
     )
+    from mypy.anytrace import record_unannotated_function
+
+    return record_unannotated_function(sig, fdef)
 
 
 def try_getting_str_literals(expr: Expression, typ: Type) -> list[str] | None:
