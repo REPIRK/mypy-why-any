@@ -25,9 +25,19 @@ from mypy.nodes import (
     NameExpr,
     OpExpr,
     RefExpr,
+    TypeAlias,
     UnaryExpr,
 )
-from mypy.types import AnyStep, AnyType, CallableType, Instance, Type, TypeOfAny, get_proper_type
+from mypy.types import (
+    AnyStep,
+    AnyType,
+    CallableType,
+    Instance,
+    Type,
+    TypeAliasType,
+    TypeOfAny,
+    get_proper_type,
+)
 from mypy.typetraverser import TypeTraverserVisitor
 
 KIND_DESCRIPTIONS: Final = {
@@ -73,6 +83,15 @@ def birth_step(t: AnyType, module: str | None, line: int, what: str | None = Non
     return AnyStep(describe_birth(t, what), module, line)
 
 
+def with_origin(t: AnyType, module: str | None, line: int) -> AnyType:
+    """Keep the reason for an untraced Any before adding propagation steps."""
+    if t.trace:
+        return t
+    result = t.copy_modified()
+    result.trace = (birth_step(t, module, line),)
+    return result
+
+
 class _OriginRecorder(TypeTraverserVisitor):
     """Give every Any inside a freshly analyzed type a birth step, if it has none.
 
@@ -108,10 +127,19 @@ class _AnyCollector(TypeTraverserVisitor):
     def __init__(self) -> None:
         super().__init__()
         self.found: list[AnyType] = []
+        self.active_aliases: set[TypeAlias] = set()
 
     def visit_any(self, t: AnyType, /) -> None:
         if not any(t is f for f in self.found):
             self.found.append(t)
+
+    def visit_type_alias_type(self, t: TypeAliasType, /) -> None:
+        # Expand aliases with their actual arguments, stopping at recursive references.
+        if t.alias is None or t.alias in self.active_aliases:
+            return
+        self.active_aliases.add(t.alias)
+        get_proper_type(t).accept(self)
+        self.active_aliases.remove(t.alias)
 
 
 def collect_any_types(typ: Type) -> list[AnyType]:

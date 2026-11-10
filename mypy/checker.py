@@ -78,7 +78,7 @@ from typing import (
 
 import mypy.checkexpr
 from mypy import errorcodes as codes, join, message_registry, nodes, operators
-from mypy.anytrace import format_trace, short_display_path, short_expr
+from mypy.anytrace import format_trace, short_display_path, short_expr, with_origin
 from mypy.binder import ConditionalTypeBinder, Frame, get_declaration
 from mypy.checker_shared import CheckerScope, TypeCheckerSharedApi, TypeRange
 from mypy.checker_state import checker_state
@@ -637,6 +637,7 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
                                 continue
 
                         self.accept(d)
+                    self.store_exported_any_traces()
 
                 assert not self.current_node_deferred
 
@@ -747,6 +748,7 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
             with self.binder.top_frame_context():
                 for d in node.defs:
                     d.accept(self)
+                self.store_exported_any_traces()
 
         assert not self.current_node_deferred
         # TODO: Handle __all__
@@ -3620,6 +3622,9 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
                 if rvalue_type and infer_lvalue_type and not isinstance(lvalue_type, PartialType):
                     # Don't use type binder for definitions of special forms, like named tuples.
                     if not (isinstance(lvalue, NameExpr) and lvalue.is_special_form):
+                        if isinstance(lvalue, RefExpr) and isinstance(lvalue.node, Var):
+                            if lvalue.node.is_inferred:
+                                rvalue_type = self.record_any_assignment(rvalue_type, lvalue)
                         self.binder.assign_type(lvalue, rvalue_type, lvalue_type)
                         if (
                             isinstance(lvalue, NameExpr)
@@ -4777,7 +4782,9 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
 
             self.set_inferred_type(name, lvalue, init_type)
             if self.options.allow_redefinition:
-                self.binder.assign_type(lvalue, init_type, init_type)
+                self.binder.assign_type(
+                    lvalue, self.record_any_assignment(init_type, lvalue), init_type
+                )
 
     def infer_partial_type(self, name: Var, lvalue: Lvalue, init_type: Type) -> bool:
         init_type = get_proper_type(init_type)
@@ -4848,6 +4855,36 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
                 return True
         return False
 
+    def record_any_assignment(self, typ: Type, lvalue: Lvalue) -> Type:
+        p_typ = get_proper_type(typ)
+        if not isinstance(p_typ, AnyType):
+            return typ
+        return with_origin(p_typ, self.tree.fullname, lvalue.line).with_step(
+            AnyStep(f'assigned to "{short_expr(lvalue)}"', self.tree.fullname, lvalue.line)
+        )
+
+    def store_exported_any_traces(self) -> None:
+        """Publish module-level provenance after control-flow analysis has finished."""
+        for name, symbol in self.globals.items():
+            var = symbol.node
+            if (
+                not isinstance(var, Var)
+                or not var.is_inferred
+                or var.fullname != f"{self.tree.fullname}.{name}"
+            ):
+                continue
+            declared = get_proper_type(var.type)
+            if not isinstance(declared, AnyType):
+                continue
+            expr = NameExpr(name)
+            expr.node = var
+            narrowed = get_proper_type(self.binder.get(expr))
+            if isinstance(narrowed, AnyType) and narrowed.trace:
+                # Keep the declared Any's kind and typing behaviour unchanged.
+                exported = declared.copy_modified()
+                exported.trace = narrowed.trace
+                var.type = exported
+
     def set_inferred_type(self, var: Var, lvalue: Lvalue, type: Type) -> None:
         """Store inferred variable type.
 
@@ -4855,12 +4892,8 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
         refers to the variable (lvalue). If var is None, do nothing.
         """
         if var and not self.current_node_deferred:
-            p_any = get_proper_type(type)
-            if isinstance(p_any, AnyType) and not var.is_argument:
-                target = short_expr(lvalue) if isinstance(lvalue, MemberExpr) else var.name
-                type = p_any.with_step(
-                    AnyStep(f'assigned to "{target}"', self.tree.fullname, lvalue.line)
-                )
+            if not var.is_argument:
+                type = self.record_any_assignment(type, lvalue)
             var.type = type
             var.is_inferred = True
             var.is_ready = True
@@ -5435,7 +5468,9 @@ class TypeChecker(NodeVisitor[None], TypeCheckerSharedApi, SplittingVisitor):
                     ):
                         self.msg.incorrectly_returning_any(return_type, s)
                         if self.options.explain_any:
-                            self.msg.explain_any(typ, s, self.any_trace_lines)
+                            self.msg.explain_any(
+                                typ, s, self.any_trace_lines, code=codes.NO_ANY_RETURN
+                            )
                     return
 
                 # Disallow return expressions in functions declared to return

@@ -1193,6 +1193,9 @@ class FuncDef(FuncItem, SymbolNode, Statement):
             ),
             "deprecated": self.deprecated,
             "original_first_arg": self.original_first_arg,
+            # Only unannotated signatures need positions when reconstructed from cache.
+            # Moving a typed definition must not change its public interface hash.
+            "line": self.line if self.type is None else -1,
         }
 
     @classmethod
@@ -1214,6 +1217,7 @@ class FuncDef(FuncItem, SymbolNode, Statement):
         # NOTE: ret.info is set in the fixup phase.
         ret.arg_names = data["arg_names"]
         ret.original_first_arg = data.get("original_first_arg")
+        ret.line = data.get("line", -1)
         ret.arg_kinds = [ARG_KINDS[x] for x in data["arg_kinds"]]
         ret.abstract_status = data["abstract_status"]
         ret.dataclass_transform_spec = (
@@ -1261,6 +1265,7 @@ class FuncDef(FuncItem, SymbolNode, Statement):
             self.dataclass_transform_spec.write(data)
         write_str_opt(data, self.deprecated)
         write_str_opt(data, self.original_first_arg)
+        write_int(data, self.line if self.type is None else -1)
         write_tag(data, END_TAG)
 
     @classmethod
@@ -1298,6 +1303,7 @@ class FuncDef(FuncItem, SymbolNode, Statement):
             ret.dataclass_transform_spec = DataclassTransformSpec.read(data)
         ret.deprecated = read_str_opt(data)
         ret.original_first_arg = read_str_opt(data)
+        ret.line = read_int(data)
         # Leave these uninitialized so that future uses will trigger an error
         del ret.arguments
         del ret.max_pos

@@ -420,6 +420,16 @@ class ConditionalTypeBinder:
                     changed = declaration_type is not None and not is_same_type(
                         type, declaration_type
                     )
+            elif (
+                isinstance(p_any_type := get_proper_type(type), AnyType)
+                and isinstance(p_current_type := get_proper_type(current_value.type), AnyType)
+                and p_any_type.trace != p_current_type.trace
+            ):
+                # Equal types may come from different assignments. Retain a trace from
+                # a reachable branch without treating it as a type change in a loop.
+                traced = p_current_type.copy_modified()
+                traced.trace = p_any_type.trace
+                self._put(key, traced, from_assignment=True)
 
         self.frames[-1].unreachable = not frames
 

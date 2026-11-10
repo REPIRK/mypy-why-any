@@ -170,3 +170,254 @@ from typing import Any
 def f() -> Any: ...
 def g() -> int:
     return f()  # E: Returning Any from function declared to return "int"
+
+[case testRevealAnySourceAlias]
+from typing import Any
+Alias = Any
+x: Alias
+reveal_any_source(x)
+[out]
+main:4: note: Any comes from explicit 'Any' in type alias "Alias" (line 2)
+
+[case testRevealAnySourceNestedAlias]
+from typing import Any, List
+Alias = List[Any]
+x: Alias
+reveal_any_source(x)
+[builtins fixtures/list.pyi]
+[out]
+main:4: note: Type "list[Any]" contains Any
+main:4: note:   Any comes from explicit 'Any' in type alias "Alias" (line 2)
+
+[case testRevealAnySourceRecursiveAlias]
+from typing import Any, List, Union
+Alias = Union[int, List['Alias'], Any]
+x: Alias
+reveal_any_source(x)
+[builtins fixtures/list.pyi]
+[out]
+main:4: note: Type "Alias" contains Any
+main:4: note:   Any comes from explicit 'Any' in type alias "Alias" (line 2)
+
+[case testRevealAnySourcePep695Alias]
+# flags: --python-version 3.12
+from typing import Any
+type Alias = Any
+x: Alias
+reveal_any_source(x)
+[out]
+main:5: note: Any comes from explicit 'Any' in type alias "Alias" (line 3)
+
+[case testRevealAnySourceReassignment]
+from typing import Any
+def first() -> Any: ...
+def second(): ...
+x = first()
+x = second()
+reveal_any_source(x)
+[out]
+main:6: note: Any comes from missing return annotation of "second" (line 3)
+main:6: note:   -> returned by "second()" (line 5)
+main:6: note:   -> assigned to "x" (line 5)
+
+[case testRevealAnySourceReassignmentAllowRedefinition]
+# flags: --allow-redefinition
+from typing import Any
+def first() -> Any: ...
+def second(): ...
+x = first()
+x = second()
+reveal_any_source(x)
+[out]
+main:7: note: Any comes from missing return annotation of "second" (line 4)
+main:7: note:   -> returned by "second()" (line 6)
+main:7: note:   -> assigned to "x" (line 6)
+
+[case testRevealAnySourceTypeError]
+x = 1
+y = x.missing()
+reveal_any_source(y)
+[out]
+main:2: error: "int" has no attribute "missing"
+main:3: note: Any comes from a type error (line 2)
+main:3: note:   -> attribute "x.missing" (line 2)
+main:3: note:   -> call of an Any value "x.missing()" (line 2)
+main:3: note:   -> assigned to "y" (line 2)
+
+[case testExplainAnyIgnoredReturnError]
+# flags: --warn-return-any --explain-any
+from typing import Any
+def f() -> Any: ...
+def g() -> int:
+    return f()  # type: ignore[no-any-return]
+
+[case testExplainAnyDisabledReturnError]
+# flags: --warn-return-any --explain-any --disable-error-code=no-any-return
+from typing import Any
+def f() -> Any: ...
+def g() -> int:
+    return f()
+
+[case testRevealAnySourceUncheckedFunction]
+def f(x):
+    reveal_any_source(x)
+[out]
+main:2: note: Any comes from unannotated code (origin not recorded)
+main:2: note: 'reveal_any_source' always outputs 'Any' in unchecked functions
+
+[case testRevealAnySourceReassignedExportIncremental]
+from util import x
+reveal_any_source(x)
+[file util.py]
+from typing import Any
+def first() -> Any: ...
+def second(): ...
+x = first()
+x = second()
+[out]
+main:2: note: Any comes from missing return annotation of "second" (tmp/util.py:3)
+main:2: note:   -> returned by "second()" (tmp/util.py:5)
+main:2: note:   -> assigned to "x" (tmp/util.py:5)
+[out2]
+main:2: note: Any comes from missing return annotation of "second" (tmp/util.py:3)
+main:2: note:   -> returned by "second()" (tmp/util.py:5)
+main:2: note:   -> assigned to "x" (tmp/util.py:5)
+
+[case testRevealAnySourceAliasAcrossModulesIncremental]
+import a
+[file a.py]
+from util import Alias
+x: Alias
+[file a.py.2]
+from util import Alias
+x: Alias
+reveal_any_source(x)
+[file util.py]
+from typing import Any
+Alias = Any
+[out]
+[out2]
+tmp/a.py:3: note: Any comes from explicit 'Any' in type alias "Alias" (tmp/util.py:2)
+
+[case testRevealAnySourceRecursiveAliasWithoutAny]
+from typing import List, Union
+Alias = Union[int, List['Alias']]
+x: Alias
+reveal_any_source(x)
+[builtins fixtures/list.pyi]
+[out]
+main:4: note: Type "Alias" does not contain Any
+
+[case testRevealAnySourceGenericCallsAcrossModules]
+from source import load
+from service import forward, relay
+x = forward(relay(load()))
+reveal_any_source(x)
+[file source.py]
+from typing import Any
+def load() -> Any: ...
+[file service.py]
+from typing import TypeVar
+T = TypeVar('T')
+def forward(value: T) -> T:
+    return value
+def relay(value: T) -> T:
+    return value
+[out]
+main:4: note: Any comes from explicit 'Any' in return type of "load" (tmp/source.py:2)
+main:4: note:   -> returned by "load()" (line 3)
+main:4: note:   -> returned by "relay(...)" (line 3)
+main:4: note:   -> returned by "forward(...)" (line 3)
+main:4: note:   -> assigned to "x" (line 3)
+
+[case testRevealAnySourceAliasAcrossModulesJsonIncremental]
+# flags: --no-fixed-format-cache
+import a
+[file a.py]
+from util import Alias
+x: Alias
+[file a.py.2]
+from util import Alias
+x: Alias
+reveal_any_source(x)
+[file util.py]
+from typing import Any
+Alias = Any
+[out]
+[out2]
+tmp/a.py:3: note: Any comes from explicit 'Any' in type alias "Alias" (tmp/util.py:2)
+
+[case testRevealAnySourceUnannotatedAcrossModulesIncremental]
+import a
+[file a.py]
+from util import read
+s = read()
+[file a.py.2]
+from util import read
+s = read()
+reveal_any_source(s)
+[file util.py]
+def read():
+    return 1
+[out]
+[out2]
+tmp/a.py:3: note: Any comes from missing return annotation of "read" (tmp/util.py:1)
+tmp/a.py:3: note:   -> returned by "read()" (line 2)
+tmp/a.py:3: note:   -> assigned to "s" (line 2)
+
+[case testRevealAnySourceUnannotatedAcrossModulesJsonIncremental]
+# flags: --no-fixed-format-cache
+import a
+[file a.py]
+from util import read
+s = read()
+[file a.py.2]
+from util import read
+s = read()
+reveal_any_source(s)
+[file util.py]
+def read():
+    return 1
+[out]
+[out2]
+tmp/a.py:3: note: Any comes from missing return annotation of "read" (tmp/util.py:1)
+tmp/a.py:3: note:   -> returned by "read()" (line 2)
+tmp/a.py:3: note:   -> assigned to "s" (line 2)
+
+[case testRevealAnySourceIndependentBranches]
+from typing import Any
+def first() -> Any: ...
+def second(): ...
+flag: bool
+x = first()
+if flag:
+    x = second()
+else:
+    reveal_any_source(x)
+[out]
+main:9: note: Any comes from explicit 'Any' in return type of "first" (line 2)
+main:9: note:   -> returned by "first()" (line 5)
+main:9: note:   -> assigned to "x" (line 5)
+
+[case testRevealAnySourceBranchReplacementIncremental]
+from util import x
+reveal_any_source(x)
+[file util.py]
+from typing import Any
+def first() -> Any: ...
+def second(): ...
+flag: bool
+x = first()
+x = first()
+if flag:
+    x = second()
+else:
+    x = second()
+[out]
+main:2: note: Any comes from missing return annotation of "second" (tmp/util.py:3)
+main:2: note:   -> returned by "second()" (tmp/util.py:8)
+main:2: note:   -> assigned to "x" (tmp/util.py:8)
+[out2]
+main:2: note: Any comes from missing return annotation of "second" (tmp/util.py:3)
+main:2: note:   -> returned by "second()" (tmp/util.py:8)
+main:2: note:   -> assigned to "x" (tmp/util.py:8)

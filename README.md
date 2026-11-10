@@ -129,12 +129,20 @@ rest of mypy are small hooks.
 .venv/Scripts/python -m pytest -q -n 0 mypy/test/testcheck.py -k explain-any
 ```
 
-17 test cases are in [`test-data/unit/check-explain-any.test`](test-data/unit/check-explain-any.test).
-The existing mypy test suite (10,821 tests) passes unchanged.
+Feature tests are in [`test-data/unit/check-explain-any.test`](test-data/unit/check-explain-any.test),
+including aliases, reassignment, ignored errors, and cross-module incremental checks with
+both cache formats. Run the core regression suites with:
+
+```bash
+.venv/Scripts/python -m pytest -q -n 4 mypy/test/testcheck.py mypy/test/testsemanal.py mypy/test/testtypes.py
+```
 
 ## Limitations
 
 - Reading a variable is not a separate step. The trace shows the assignment, not each use.
+- At control-flow joins, the trace shows one possible source of `Any`.
+- In unchecked function bodies, expressions have `Any` regardless of their runtime value.
+  Use `--check-untyped-defs` or annotate the function to trace their inferred types.
 - `Any` from a type error or from special forms is described by its kind; the exact place is
   not recorded when it is created deep inside type checking.
 - The trace keeps at most 25 steps. The birth step is always kept, the oldest intermediate

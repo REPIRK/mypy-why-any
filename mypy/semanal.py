@@ -4186,6 +4186,8 @@ class SemanticAnalyzer(
         for _, tv in alias_type_vars:
             if tv.default_depends is not None:
                 default_depends[tv.fullname] = tv.default_depends
+        if analyzed is not None:
+            record_origins(analyzed, self.cur_mod_id, rvalue.line, f'type alias "{name}"')
         return analyzed, new_tvar_defs, depends_on, indexed, default_depends
 
     def is_pep_613(self, s: AssignmentStmt) -> bool:

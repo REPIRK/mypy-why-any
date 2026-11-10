@@ -14,7 +14,7 @@ from typing_extensions import assert_never
 import mypy.checker
 import mypy.errorcodes as codes
 from mypy import applytype, erasetype, join, message_registry, nodes, operators, types
-from mypy.anytrace import describe_expression_step
+from mypy.anytrace import describe_expression_step, with_origin
 from mypy.argmap import ArgTypeExpander, map_actuals_to_formals, map_formals_to_actuals
 from mypy.checker_shared import ExpressionCheckerSharedApi
 from mypy.checkmember import analyze_member_access, has_operator
@@ -5026,6 +5026,11 @@ class ExpressionChecker(ExpressionVisitor[Type], ExpressionCheckerSharedApi):
             )
             if not self.chk.current_node_deferred:
                 self.msg.reveal_any_source(revealed_type, expr.expr, self.chk.any_trace_lines)
+                if not self.chk.in_checked_function():
+                    self.msg.note(
+                        "'reveal_any_source' always outputs 'Any' in unchecked functions",
+                        expr.expr,
+                    )
             return revealed_type
         else:
             # REVEAL_LOCALS
@@ -6444,7 +6449,9 @@ class ExpressionChecker(ExpressionVisitor[Type], ExpressionCheckerSharedApi):
         message = describe_expression_step(node, base_is_any)
         if message is None:
             return typ
-        return p_typ.with_step(AnyStep(message, self.chk.tree.fullname, node.line))
+        return with_origin(p_typ, self.chk.tree.fullname, node.line).with_step(
+            AnyStep(message, self.chk.tree.fullname, node.line)
+        )
 
     def accept_maybe_cache(self, node: Expression, type_context: Type | None = None) -> Type:
         binder_version = self.chk.binder.version
@@ -6721,6 +6728,17 @@ class ExpressionChecker(ExpressionVisitor[Type], ExpressionCheckerSharedApi):
                 if skip_non_overlapping and not is_overlapping_types(known_type, restriction):
                     return None
                 narrowed = narrow_declared_type(known_type, restriction)
+                p_narrowed = get_proper_type(narrowed)
+                p_restriction = get_proper_type(restriction)
+                if (
+                    isinstance(p_narrowed, AnyType)
+                    and isinstance(p_restriction, AnyType)
+                    and p_restriction.trace
+                ):
+                    # Equal Any types can still have different provenance after assignment.
+                    result = p_narrowed.copy_modified()
+                    result.trace = p_restriction.trace
+                    return result
                 if isinstance(get_proper_type(narrowed), UninhabitedType):
                     # If we hit this case, it means that we can't reliably mark the code as
                     # unreachable, but the resulting type can't be expressed in type system.

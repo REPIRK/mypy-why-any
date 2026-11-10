@@ -1870,12 +1870,17 @@ class MessageBuilder:
             self.note(line, context)
 
     def explain_any(
-        self, typ: Type, context: Context, explain: Callable[[AnyType], list[str]]
+        self,
+        typ: Type,
+        context: Context,
+        explain: Callable[[AnyType], list[str]],
+        *,
+        code: ErrorCode | None = None,
     ) -> None:
         """Notes for --explain-any under an error about Any."""
         for any_type in collect_any_types(typ)[:1]:
             for line in explain(any_type):
-                self.note(line, context, code=codes.MISC)
+                self.note(line, context, code=code)
 
     def reveal_locals(self, type_map: dict[str, Type | None], context: Context) -> None:
         # To ensure that the output is predictable on Python < 3.6,
